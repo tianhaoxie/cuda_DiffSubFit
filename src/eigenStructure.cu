@@ -48,14 +48,13 @@ void eigenStructure::load(){
                 for (int j = 0; j < K; j++)
                 {
                     // data contains Phi in row major
-                    ev[i].Phi[j*K*k+l] = *(double*)&LoopSubdivisionData::data[index++];
+                    ev[i].Phi[k*K*12+j*12+l] = *(double*)&LoopSubdivisionData::data[index++];
                 }
             }
         }
 
     }
 }
-
 
 void eigenStructure::to_device(float** p_eigenValues, float** p_eigenVectors,float** Phi){
     int Nmax = LoopSubdivisionData::Nmax;
@@ -68,3 +67,4 @@ void eigenStructure::to_device(float** p_eigenValues, float** p_eigenVectors,flo
         Phi[i] = thrust::raw_pointer_cast(ev[i].d_Phi.data());
     }
 }
+

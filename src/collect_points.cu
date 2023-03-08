@@ -56,7 +56,13 @@ __device__ void collect_irregular(int* collected_patch, int* adj,int* face,int n
             break;
         }
     }
-    for (int i=0;i<3;i++){
+    for (int j=0;j<N;j++){
+            if (adj[face_ordered[0]*num_neighbor+j]==face_ordered[1]){
+                adj_order[0] = j;
+                break;
+            }
+    }
+    for (int i=1;i<3;i++){
         for (int j=0;j<6;j++){
             if (adj[face_ordered[i]*num_neighbor+j]==face_ordered[(i+1)%3]){
                 adj_order[i] = j;
