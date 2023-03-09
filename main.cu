@@ -74,25 +74,62 @@ void read_obj(const std::string path,thrust::host_vector<float>& vertices,thrust
         }
     } 
 }
-
-int main(){
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);    
-    cudaEventCreate(&stop);
+void loop_forward(float* p_vertices,int* p_faces,float* p_limit,int* p_adj,int* p_vf,int* p_collected_patch,int num_verts,int num_faces,int num_neighbor=12){
     eigenStructure* es = new eigenStructure();
     float** p_eigenValues;
     float** p_eigenVectors;
     float** p_Phi;
+    cudaHostAlloc((void**)&p_eigenValues, (num_neighbor-3)*sizeof(float*),cudaHostAllocMapped);
+    cudaHostAlloc((void**)&p_eigenVectors, (num_neighbor-3)*sizeof(float*),cudaHostAllocMapped);
+    cudaHostAlloc((void**)&p_Phi, (num_neighbor-3)*sizeof(float*),cudaHostAllocMapped);
+    es->to_device(p_eigenValues,p_eigenVectors,p_Phi);
+    int thread_num = 512;
+    int total_thread_num = num_verts;
+    int block_num = total_thread_num/thread_num +1;
+    sorted_adjacency_list<<< block_num,thread_num >>> (p_faces,num_faces*3,p_adj,p_vf,num_verts,num_neighbor);
+    cudaDeviceSynchronize();
+    total_thread_num = num_faces;
+    block_num = total_thread_num/thread_num +1;
+    collect_patch<<< block_num,thread_num >>> (p_faces,num_faces*3,p_collected_patch,p_adj,num_neighbor,num_neighbor+6);
+    cudaDeviceSynchronize();
+    total_thread_num = num_verts;
+    block_num = total_thread_num/thread_num +1;
+    evaluate<<<block_num,thread_num>>> (p_vertices,p_faces,num_verts,p_limit,p_adj,p_vf,p_collected_patch,num_neighbor,num_neighbor+6, p_eigenValues,p_eigenVectors,p_Phi);
+    cudaDeviceSynchronize();
+}
+
+void loop_backward(int* p_faces,float* p_J,int* p_adj,int* p_vf,int* p_collected_patch,int num_verts,int num_faces,int num_neighbor=12){
+    eigenStructure* es = new eigenStructure();
+    float** p_eigenValues;
+    float** p_eigenVectors;
+    float** p_Phi;
+    cudaHostAlloc((void**)&p_eigenValues, (num_neighbor-3)*sizeof(float*),cudaHostAllocMapped);
+    cudaHostAlloc((void**)&p_eigenVectors, (num_neighbor-3)*sizeof(float*),cudaHostAllocMapped);
+    cudaHostAlloc((void**)&p_Phi, (num_neighbor-3)*sizeof(float*),cudaHostAllocMapped);
+    es->to_device(p_eigenValues,p_eigenVectors,p_Phi);
+    int thread_num = 512;
+    int total_thread_num = num_verts;
+    int block_num = total_thread_num/thread_num +1;
+    evaluateJacobian<<<block_num,thread_num>>>(p_faces,num_verts,p_J,p_adj,p_vf,p_collected_patch,num_neighbor,num_neighbor+6,p_eigenValues,p_eigenVectors,p_Phi);
+    cudaDeviceSynchronize();
+}
+int main(){
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);    
+    cudaEventCreate(&stop);
     thrust::host_vector<float> vertices;
     thrust::host_vector<int> faces;
     int num_neighbor = 12;
-    read_obj("../puppet.obj",vertices,faces);
+    read_obj("../sphere.obj",vertices,faces);
+    
     thrust::device_vector<float> d_vertices;
     thrust::device_vector<float> d_limit(vertices.size());
+    thrust::device_vector<float> d_J(vertices.size()*vertices.size()/9);
     thrust::device_vector<int> d_faces;
     thrust::device_vector<int> d_adj(vertices.size()/3*num_neighbor);
+    thrust::device_vector<int> d_vf(vertices.size()/3);
     thrust::device_vector<int> d_collected_patch(faces.size()/3*(num_neighbor+6));
-    thrust::device_vector<float> d_J(vertices.size()*vertices.size()/9);
+    
     
     thrust::host_vector<float> limit(vertices.size());
     thrust::host_vector<int> adj(vertices.size()/3*num_neighbor);
@@ -103,17 +140,14 @@ int main(){
     d_vertices = vertices;
     d_faces = faces;
     float* p_vertices = thrust::raw_pointer_cast(d_vertices.data());
-    float* p_limit = thrust::raw_pointer_cast(d_limit.data());\
+    float* p_limit = thrust::raw_pointer_cast(d_limit.data());
     float* p_J = thrust::raw_pointer_cast(d_J.data());
     //float* p_Cp = thrust::raw_pointer_cast(d_Cp.data());
     int* p_faces = thrust::raw_pointer_cast(d_faces.data());
     int* p_adj = thrust::raw_pointer_cast(d_adj.data());
+    int* p_vf = thrust::raw_pointer_cast(d_vf.data());
     int* p_collected_patch = thrust::raw_pointer_cast(d_collected_patch.data());
-
-    cudaHostAlloc((void**)&p_eigenValues, (num_neighbor-3)*sizeof(float*),cudaHostAllocMapped);
-    cudaHostAlloc((void**)&p_eigenVectors, (num_neighbor-3)*sizeof(float*),cudaHostAllocMapped);
-    cudaHostAlloc((void**)&p_Phi, (num_neighbor-3)*sizeof(float*),cudaHostAllocMapped);
-    es->to_device(p_eigenValues,p_eigenVectors,p_Phi);
+   
     /*
     size_t free_byte ;
     size_t total_byte ;
@@ -123,25 +157,11 @@ int main(){
     double used_db = total_db - free_db ;
     printf("GPU memory usage: used = %f, free = %f MB, total = %f MB\n",used_db/1024.0/1024.0, free_db/1024.0/1024.0, total_db/1024.0/1024.0);
     */
-    int thread_num = 512;
-    int total_thread_num = vertices.size()/3;
-    int block_num = total_thread_num/thread_num +1;
-    
-    
-    sorted_adjacency_list<<< block_num,thread_num >>> (p_faces,d_faces.size(),p_adj,vertices.size()/3,num_neighbor);
-    cudaDeviceSynchronize();
-    total_thread_num = faces.size()/3;
-    block_num = total_thread_num/thread_num +1;
-    
-    collect_patch<<< block_num,thread_num >>> (p_faces,d_faces.size(),p_collected_patch,p_adj,num_neighbor,num_neighbor+6);
-    cudaDeviceSynchronize();
     cudaEventRecord(start);
-    //test<<<1,1>>> (p_eigenValues,p_eigenVectors,p_Phi);
-    evaluate<<<block_num,thread_num>>> (p_vertices,p_faces,d_faces.size(),p_limit,p_adj,p_collected_patch,num_neighbor,num_neighbor+6, p_eigenValues,p_eigenVectors,p_Phi);
-    cudaDeviceSynchronize();
-    
-    evaluateJacobian<<<block_num,thread_num>>>(p_faces,d_faces.size(),p_J,p_adj,p_collected_patch,vertices.size()/3,num_neighbor,num_neighbor+6,p_eigenValues,p_eigenVectors,p_Phi);
-    cudaDeviceSynchronize();
+    loop_forward(p_vertices,p_faces,p_limit,p_adj,p_vf,p_collected_patch,d_vertices.size()/3,d_faces.size()/3);
+    loop_backward(p_faces,p_J,p_adj,p_vf,p_collected_patch,d_vertices.size()/3,d_faces.size()/3);
+    //evaluateJacobian<<<block_num,thread_num>>>(p_faces,d_vertices.size()/3,p_J,p_adj,p_vf,p_collected_patch,num_neighbor,num_neighbor+6,p_eigenValues,p_eigenVectors,p_Phi);
+    //cudaDeviceSynchronize();
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     float milliseconds = 0;

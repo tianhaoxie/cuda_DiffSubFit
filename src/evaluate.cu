@@ -23,10 +23,26 @@ __device__ void getb(float v, float w, float* b){
 
 
  
-__device__ void evaluateRegular(int vertex_idx, float* L,float* C, float* bary){
+__device__ void evaluateRegular(int vertex_idx,int face_idx,float* V,int* face, float* L,int* collected_patches,int num_per_patch){
+    float bary[3];
+    float C[36];
     float basis[12];
     float r[3];
     float tmp =0;
+
+    for (int i=0;i<3;i++){
+        if (face[i]==vertex_idx){
+            bary[i]=1;
+            bary[(i+1)%3]=0;
+            bary[(i+2)%3]=0;
+            break;
+        }
+    }
+    for (int i=0;i<3;i++){
+        for (int j=0;j<12;j++){
+            C[i*12+j] = V[collected_patches[face_idx*num_per_patch+j]*3+i];
+            }    
+    }
     getb(bary[1],bary[2],basis);
     for (int i =0;i<3;i++){
         for (int j=0;j<12;j++){
@@ -40,25 +56,7 @@ __device__ void evaluateRegular(int vertex_idx, float* L,float* C, float* bary){
     L[vertex_idx*3+2] = r[2];
 }
 
-__device__ void evaluateRegularFace(float* V,int* face, float* L,int* collected_patches,int num_per_patch){
-    
-    int face_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    float bary[3];
-    float C[36];
-    for (int i=0;i<3;i++){
-        bary[i] = 0;
-    }
-    for (int i=0;i<3;i++){
-        for (int j=0;j<12;j++){
-            C[i*12+j] = V[collected_patches[face_idx*num_per_patch+j]*3+i];
-            }    
-    }
-    for (int i=0;i<3;i++){
-        bary[i]=1;
-        evaluateRegular(face[i],L,C,bary);
-        bary[i]=0;
-    }
-}
+
 
 __device__ float evalBasis(float* m, float v, float w){
     float basis[12];
@@ -130,11 +128,31 @@ __device__ void evalSurf(float* Pp, float* Cp,int num_per_patch,int N, float v, 
     }
 }
 
-__device__ void evaluateIrregular(float* V,int vertex_idx, float* L,float* C,int N,int num_per_patch, float* bary,float** eigenValues,float** eigenVectors,float** Phi){
-    //size_t size = ((N+6)*3)*sizeof(float);
-    //float* Cp = (float*)malloc(size);
+__device__ void evaluateIrregular(int vertex_idx,int face_idx, float* V,float* L,int* adj,int* collected_patches,int num_per_patch,int num_neighbor,float** eigenValues,float** eigenVectors,float** Phi){
+    
+    float C[18*3];
+    float bary[3];
     float Cp[18*3];
     float Pp[3];
+    int face_ordered[3];
+    int N;
+    face_ordered[0] = collected_patches[face_idx*num_per_patch];
+    face_ordered[1] = collected_patches[face_idx*num_per_patch+1];
+    N = valence(adj,face_ordered[0],num_neighbor);
+    face_ordered[2] = collected_patches[face_idx*num_per_patch+N]; 
+    for (int i=0;i<3;i++){
+        if (face_ordered[i]==vertex_idx){
+            bary[i]=1;
+            bary[(i+1)%3]=0;
+            bary[(i+2)%3]=0;
+            break;
+        }
+    }
+    for (int i=0;i<N+6;i++){
+        for (int j=0;j<3;j++){
+            C[i*3+j] = V[collected_patches[face_idx*num_per_patch+i]*3+j];
+            }    
+    }
     projectPoints(C,Cp,num_per_patch, N,eigenVectors);
     evalSurf(Pp,Cp,num_per_patch,N,bary[1],bary[2],eigenValues,Phi);
     L[vertex_idx*3] = Pp[0];
@@ -142,58 +160,38 @@ __device__ void evaluateIrregular(float* V,int vertex_idx, float* L,float* C,int
     L[vertex_idx*3+2] = Pp[2];
 }
 
-__device__ void evaluateIrregularFace(float* V,int* face, float* L,int* adj,int* collected_patches,int num_per_patch,int num_neighbor,float** eigenValues,float** eigenVectors,float** Phi){
-    int face_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int face_ordered[3];
-    int N;
-        
-    face_ordered[0] = collected_patches[face_idx*num_per_patch];
-    face_ordered[1] = collected_patches[face_idx*num_per_patch+1];
-    N = valence(adj,face_ordered[0],num_neighbor);
-    face_ordered[2] = collected_patches[face_idx*num_per_patch+N];
-            
-   
-    //size_t size = ((N+6)*3)*sizeof(float);
-    //float* C = (float*)malloc(size);
-    float C[18*3];
-    float bary[3];
-    for (int i=0;i<3;i++){
-        bary[i] = 0;
-    }
-    for (int i=0;i<N+6;i++){
-        for (int j=0;j<3;j++){
-            C[i*3+j] = V[collected_patches[face_idx*num_per_patch+i]*3+j];
-            }    
-    }
-    
-    for (int i=0;i<3;i++){
-        bary[i]=1;
-        evaluateIrregular(V,face_ordered[i],L,C,N,num_per_patch,bary, eigenValues,eigenVectors, Phi);
-        bary[i]=0;
-    }
-}
 
-__global__ void evaluate(float* V,int* F,int N_f, float* L,int* adj,int* collected_patches,int num_neighbor,int num_per_patch,float** eigenValues,float** eigenVectors,float** Phi){
-    int face_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    //int face_idx = 10140;
-    if (face_idx>N_f/3-1){
+
+__global__ void evaluate(float* V,int* F,int verts_num, float* L,int* adj,int* vf,int* collected_patches,int num_neighbor,int num_per_patch,float** eigenValues,float** eigenVectors,float** Phi){
+    int vert_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (vert_idx>verts_num-1){
         return;
     }
+    int face_idx = vf[vert_idx];
+    //int face_idx = 10140;
     int face[3];
     face[0] = F[face_idx*3];
     face[1] = F[face_idx*3+1];
     face[2] = F[face_idx*3+2];
     if (regular(adj,face,num_neighbor)){
-        evaluateRegularFace(V,face,L,collected_patches,num_per_patch);
+        evaluateRegular(vert_idx,face_idx,V,face,L,collected_patches,num_per_patch);
     }
     else{
-        evaluateIrregularFace(V,face,L,adj,collected_patches,num_per_patch,num_neighbor,eigenValues,eigenVectors,Phi);
+        evaluateIrregular(vert_idx,face_idx,V,L,adj,collected_patches,num_per_patch,num_neighbor,eigenValues,eigenVectors,Phi);
     }
 }
 
-__device__ void evaluateJacobianRegular(int vert_idx,float* J,int * collected_patches, int num_per_patch,int verts_num, float* bary ){
-    int face_idx =  blockIdx.x * blockDim.x + threadIdx.x;
+__device__ void evaluateJacobianRegular(int vert_idx,int face_idx,int* face, float* J,int * collected_patches, int num_per_patch,int verts_num){
     float basis[12];
+    float bary[3];
+    for (int i=0;i<3;i++){
+        if (face[i]==vert_idx){
+            bary[i]=1;
+            bary[(i+1)%3]=0;
+            bary[(i+2)%3]=0;
+            break;
+        }
+    }
     getb(bary[1],bary[2],basis);
     int K;
     for (int i=0;i<12;i++){
@@ -202,24 +200,35 @@ __device__ void evaluateJacobianRegular(int vert_idx,float* J,int * collected_pa
     }
 }
 
-__device__ void evaluateJacobianRegularFace(int* face, float* J,int* collected_patches,int num_per_patch,int verts_num){
-    float bary[3];
-    for (int i=0;i<3;i++){
-        bary[i] = 0;
-    }
-    for (int i=0;i<3;i++){
-        bary[i]=1;
-        evaluateJacobianRegular(face[i],J,collected_patches, num_per_patch,verts_num, bary);
-        bary[i]=0;
-    }
-}
 
-__device__ void evaluateJacobianIrregular(int vert_idx,float* C,float* J,int * collected_patches, int N,int num_per_patch,int verts_num, float* bary, float** eigenValues,float** eigenVectors,float** Phi){
-    int face_idx =  blockIdx.x * blockDim.x + threadIdx.x;
-    float Cp[18*3];
-    float Pp[3];
-    int K;
+__device__ void evaluateJacobianIrregular(int vert_idx,int face_idx,float* J,int * collected_patches, int* adj,int num_neighbor,int num_per_patch,int verts_num, float** eigenValues,float** eigenVectors,float** Phi){
     
+    float Cp[18*3];
+    float C[18*3];
+    float Pp[3];
+    int bary[3],face_ordered[3];
+    int K,N;
+    
+    face_ordered[0] = collected_patches[face_idx*num_per_patch];
+    face_ordered[1] = collected_patches[face_idx*num_per_patch+1];
+    N = valence(adj,face_ordered[0],num_neighbor);
+    face_ordered[2] = collected_patches[face_idx*num_per_patch+N];
+
+    for (int i=0;i<3;i++){
+        if (face_ordered[i]==vert_idx){
+            bary[i]=1;
+            bary[(i+1)%3]=0;
+            bary[(i+2)%3]=0;
+            break;
+        }
+    }
+
+    for (int i=0;i<N+6;i++){
+        for (int j=0;j<3;j++){
+            C[i*3+j] = 0;
+        }    
+    }
+
     for (int i=0;i<N;i++){
         K = collected_patches[face_idx*num_per_patch+i];
         C[i*num_per_patch] = 1;
@@ -236,45 +245,22 @@ __device__ void evaluateJacobianIrregular(int vert_idx,float* C,float* J,int * c
     
 }
 
-__device__ void evaluateJacobianIrregularFace(int* face, float* J,int* collected_patches,int* adj,int num_neighbor,int num_per_patch,int verts_num,float** eigenValues,float** eigenVectors,float** Phi){
-    int face_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int face_ordered[3];
-    int N;
-    float bary[3];    
-    float C[18*3];
-    face_ordered[0] = collected_patches[face_idx*num_per_patch];
-    face_ordered[1] = collected_patches[face_idx*num_per_patch+1];
-    N = valence(adj,face_ordered[0],num_neighbor);
-    face_ordered[2] = collected_patches[face_idx*num_per_patch+N];
-    
-    for (int i=0;i<3;i++){
-        bary[i] = 0;
-    }
-    for (int i=0;i<N+6;i++){
-        for (int j=0;j<3;j++){
-            C[i*3+j] = 0;
-            }    
-    }
-    for (int i=0;i<3;i++){
-        bary[i]=1;
-        evaluateJacobianIrregular(face_ordered[i],C,J,collected_patches, N,num_per_patch,verts_num,bary, eigenValues,eigenVectors,Phi);
-        bary[i]=0;
-    }
-}
 
-__global__ void evaluateJacobian(int* F,int N_f, float* J,int* adj,int* collected_patches,int verts_num,int num_neighbor,int num_per_patch,float** eigenValues,float** eigenVectors,float** Phi){
-    int face_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (face_idx>N_f/3-1){
+
+__global__ void evaluateJacobian(int* F,int verts_num, float* J,int* adj,int* vf,int* collected_patches,int num_neighbor,int num_per_patch,float** eigenValues,float** eigenVectors,float** Phi){
+    int verts_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (verts_idx>verts_num-1){
         return;
     }
+    int face_idx = vf[verts_idx];
     int face[3];
     face[0] = F[face_idx*3];
     face[1] = F[face_idx*3+1];
     face[2] = F[face_idx*3+2];
     if (regular(adj,face,num_neighbor)){
-        evaluateJacobianRegularFace(face,J,collected_patches,num_per_patch,verts_num);
+        evaluateJacobianRegular(verts_idx,face_idx,face,J,collected_patches,num_per_patch,verts_num);
     }
     else{
-        evaluateJacobianIrregularFace(face,J,collected_patches,adj,num_neighbor,num_per_patch,verts_num,eigenValues,eigenVectors,Phi);
+        evaluateJacobianIrregular(verts_idx,face_idx,J,collected_patches,adj,num_neighbor,num_per_patch,verts_num,eigenValues,eigenVectors,Phi);
     }
 }

@@ -1,6 +1,6 @@
 #include "adj_list.h"
 
-__global__ void sorted_adjacency_list(int* f,int N_f,int* adj,const int vertex_num,const int num_neighbor){
+__global__ void sorted_adjacency_list(int* f,int N_f,int* adj,int* vf, const int vertex_num,const int num_neighbor){
     int present_thread = blockIdx.x * blockDim.x + threadIdx.x;
     if (present_thread>vertex_num-1){
         return;
@@ -9,13 +9,19 @@ __global__ void sorted_adjacency_list(int* f,int N_f,int* adj,const int vertex_n
     int face_idx;
     int p_in;
     int tmp[30];
+    int n=0;
     for (int i=0;i<30;i++){
         tmp[i]=-1;
     }
     for (int i =0;i<N_f;i++){
+        
         if (f[i]==vert_idx){
             p_in = i%3;
             face_idx = i/3;
+            if (n==0){
+                vf[vert_idx]=face_idx;
+                n++;
+            }
             int v1 = f[face_idx*3+(p_in+1)%3];
             int v2 = f[face_idx*3+(p_in+2)%3];
             for (int j=0;j<num_neighbor;j++){
