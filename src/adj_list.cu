@@ -54,3 +54,32 @@ __global__ void sorted_adjacency_list(int* f,int N_f,int* adj,int* vf, const int
     }
     
 }
+
+__global__ void face_face_adjacency(int* f,int N_f,int* ff,int*ffi){
+    int present_thread = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if (present_thread>N_f/3-1){
+        return;
+    }
+    int ei,ej,face_idx,p_in;
+    for (int i=0;i<3;i++){
+        ei = f[present_thread*3+i];
+        ej = f[present_thread*3+(i+1)%3];
+        
+        for (int j=0;j<N_f;j++){
+            if (f[j]==ei){
+                face_idx = j/3;
+                p_in = j%3;
+                
+                if (f[face_idx*3+(p_in+2)%3]==ej){
+                    ff[present_thread*3+i] = face_idx;
+                    for (int k =0;k<3;k++){
+                        if (f[face_idx*3+k]==ej){
+                            ffi[present_thread*3+i] = k;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,8 +1,8 @@
 #include "collect_points.h"
-__device__ int valence(int*adj, int face_idx,int num_neighbor){
+__device__ int valence(int*adj, int vert_idx,int num_neighbor){
     int valence = 0;
     for (int j=0;j<num_neighbor;j++){
-        if(adj[face_idx*num_neighbor+j]==-1){
+        if(adj[vert_idx*num_neighbor+j]==-1){
             break;
         }
         valence++;   
