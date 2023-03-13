@@ -2,28 +2,20 @@
 #include <vector>
 #include <stdio.h>
 // CUDA functions declarations
-void loop_cuda_forward(
+void loop_cuda_fb(
     float* p_vertices,
     int* p_faces,
     float* p_limit,
-    int* p_adj,
-    int* p_vf,
-    int* p_collected_patch,
-    int num_verts,
-    int num_faces,
-    int num_neighbor=12);
-
-void loop_cuda_backward(
-    int* p_faces,
     float* p_J,
-    int* p_adj,
-    int* p_vf,
-    int* p_collected_patch,
+    float* p_S,
     int num_verts,
+    int num_verts_before_sub,
     int num_faces,
     int num_neighbor=12);
 
-void sub(int* F, int* NF,float* V,float* NV,float* S,int* adj,int* vf,int* ff,int* ffi,int* ex2,int num_faces,int num_edges,int num_verts,int num_neighbor);
+
+
+void sub(int* F, int* NF,float* V,float* NV,float* S,int* ex2,int num_faces,int num_edges,int num_verts,int num_neighbor);
 
 // C++ interface
 #define CHECK_CUDA(x) TORCH_CHECK(x.is_cuda(), #x " must be a CUDA tensor")
@@ -49,65 +41,56 @@ struct loop_limitation_cuda : torch::CustomClassHolder{
         .layout(torch::kStrided)
         .device(torch::kCUDA, 0)
         .requires_grad(false);
-        std::vector<torch::Tensor> r(2);
+        std::vector<torch::Tensor> r(3);
         
         int num_neighbor=12;
         int num_verts = V.size(0);
         int num_faces = F.size(0);
-        torch::Tensor limit = torch::zeros({num_verts,3},options_float);
-        torch::Tensor adj = torch::full({num_verts,num_neighbor},-1,options_int);
-        torch::Tensor vf = torch::zeros({num_verts},options_int);
-        torch::Tensor ff = torch::zeros({num_faces,3},options_int);
-        torch::Tensor ffi = torch::zeros({num_faces,3},options_int);
-        torch::Tensor NF = torch::zeros({num_faces*4,3},options_int);
-        torch::Tensor collected_patches = torch::full({num_verts,num_neighbor+6},-1,options_int);
-        torch::Tensor J = torch::zeros({num_verts,num_verts},options_float);
-        float* p_vertices = V.data_ptr<float>();
-        float* p_limit = limit.data_ptr<float>();
-        float* p_J = J.data_ptr<float>();
-        int* p_adj = adj.data_ptr<int>();
-        int* p_faces = F.data_ptr<int>();
-        int* p_vf = vf.data_ptr<int>();
-        int* p_ff = ff.data_ptr<int>();
-        int* p_ffi = ffi.data_ptr<int>();
-        int* p_NF = NF.data_ptr<int>();
-        int* p_collected_patches = collected_patches.data_ptr<int>();
-
         torch::Tensor ex2 = torch::_cast_Int(find_edges(F));
         torch::Tensor S = torch::zeros({num_verts+ex2.size(0),num_verts},options_float);
         torch::Tensor NV = torch::zeros({num_verts+ex2.size(0),3},options_float);
+        torch::Tensor NF = torch::zeros({num_faces*4,3},options_int);
+        float* p_vertices = V.data_ptr<float>();
         float* p_S = S.data_ptr<float>();
-        float* p_NV = NV.data_ptr<float>();
+        float* p_NV = NV.data_ptr<float>();        
+        int* p_faces = F.data_ptr<int>();
         int* p_ex2 = ex2.data_ptr<int>();
+        int* p_NF = NF.data_ptr<int>();
+        sub(p_faces,p_NF,p_vertices,p_NV,p_S,p_ex2,num_faces,ex2.size(0),num_verts,num_neighbor);
         
-        sub(p_faces,p_NF,p_vertices,p_NV,p_S,p_adj,p_vf,p_ff,p_ffi,p_ex2,num_faces,ex2.size(0),num_verts,num_neighbor);
-        //r[0] = torch::matmul(S,V);
-        r[0] = NV;
-        r[1] = NF;
-        //return r;
-        /*
-        loop_cuda_forward(
-            p_vertices,
-            p_faces,
+        //S = torch::_sparse_coo_tensor_with_dims(1,0,{S.size(0),S.size(1)},options_float);
+        
+        num_verts = NV.size(0);
+        num_faces = NF.size(0);
+        torch::Tensor limit = torch::zeros({num_verts,3},options_float);
+        // J = jacobian of loop evaluation* S 
+        torch::Tensor J = torch::zeros({num_verts,num_verts},options_float);
+        //torch::Tensor J = torch::zeros({num_verts,num_verts},options_float);
+        float* p_limit = limit.data_ptr<float>();
+        float* p_J = J.data_ptr<float>();
+
+        loop_cuda_fb(
+            p_NV,
+            p_NF,
             p_limit,
-            p_adj,
-            p_vf,
-            p_collected_patches,
-            num_verts,
-            num_faces,
-            num_neighbor);
-        r[0] = limit;
-        loop_cuda_backward(
-            p_faces,
             p_J,
-            p_adj,
-            p_vf,
-            p_collected_patches,
+            p_S,
             num_verts,
+            V.size(0),
             num_faces,
             num_neighbor);
+        
+        //J = torch::matmul(J,S);
+        J = J.to_sparse();
+        S = S.to_sparse();
+        //J = J.mm(S);
+        //r[0] = limit.index({Slice(V.size(0)),Slice()});
+        //r[1] = J.index({Slice(V.size(0)),Slice()});
+        limit = limit.index({Slice(None,V.size(0)),Slice()});
+        //J = J.index({Slice(None,V.size(0)),Slice()});
+        r[0] = limit;
         r[1] = J;
-        */
+        r[2] = S;
         return r;
         
     }
