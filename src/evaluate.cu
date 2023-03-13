@@ -181,6 +181,108 @@ __global__ void evaluate(float* V,int* F,int verts_num, float* L,int* adj,int* v
     }
 }
 
+/*
+__device__ void evaluateJacobianRegular(int row,int col,int face_idx,int* face, float* J,float* S,int * collected_patches, int num_per_patch,int cols){
+    
+    float basis[12];
+    float bary[3];
+    for (int i=0;i<3;i++){
+        if (face[i]==row){
+            bary[i]=1;
+            bary[(i+1)%3]=0;
+            bary[(i+2)%3]=0;
+            break;
+        }
+    }
+    getb(bary[1],bary[2],basis);
+    int K;
+    float r = 0.0;
+    for (int i=0;i<12;i++){
+        K = collected_patches[face_idx*num_per_patch+i];
+        r += S[K*cols+col]*basis[i];
+    }
+    J[row*cols+col] = r;
+}
+
+
+__device__ void evaluateJacobianIrregular(int row,int col,int face_idx,float* J,float* S,int * collected_patches, int* adj,int num_neighbor,int num_per_patch,int cols, float** eigenValues,float** eigenVectors,float** Phi){
+    
+    float Cp[18*3];
+    float C[18*3];
+    float Pp[3];
+    int bary[3],face_ordered[3];
+    int K,N;
+    float r=0.0;
+    face_ordered[0] = collected_patches[face_idx*num_per_patch];
+    face_ordered[1] = collected_patches[face_idx*num_per_patch+1];
+    N = valence(adj,face_ordered[0],num_neighbor);
+    face_ordered[2] = collected_patches[face_idx*num_per_patch+N];
+
+    for (int i=0;i<3;i++){
+        if (face_ordered[i]==row){
+            bary[i]=1;
+            bary[(i+1)%3]=0;
+            bary[(i+2)%3]=0;
+            break;
+        }
+    }
+
+    for (int i=0;i<N+6;i++){
+        for (int j=0;j<3;j++){
+            C[i*3+j] = 0;
+        }    
+    }
+
+    for (int i=0;i<N+6;i++){
+        K = collected_patches[face_idx*num_per_patch+i];
+        C[i*3] = 1;
+        C[i*3+1] = 1;
+        C[i*3+2] = 1;
+        projectPoints(C,Cp,num_per_patch, N,eigenVectors);
+        evalSurf(Pp,Cp,num_per_patch,N,bary[1],bary[2],eigenValues,Phi);
+        r += S[K*cols+col]* Pp[0];
+        C[i*3] = 0;
+        C[i*3+1] = 0;
+        C[i*3+2] = 0;
+    }
+    J[row*cols+col] = r;
+    
+    
+    
+}
+
+
+
+__global__ void evaluateJacobian(int* F,int rows, int cols, float* J,float* S,int* adj,int* vf,int* collected_patches,int num_neighbor,int num_per_patch,float** eigenValues,float** eigenVectors,float** Phi){
+    int i=blockIdx.y * blockDim.y + threadIdx.y;
+    int j=blockIdx.x * blockDim.x + threadIdx.x;
+    if (i>=rows || j>= cols){
+        return;
+    }
+
+    
+    
+    int face_idx = vf[i];
+    int face[3];
+    face[0] = F[face_idx*3];
+    face[1] = F[face_idx*3+1];
+    face[2] = F[face_idx*3+2];
+    
+    if (regular(adj,face,num_neighbor)){
+        
+        evaluateJacobianRegular(i,j,face_idx,face,J,S,collected_patches,num_per_patch,cols);
+        
+        
+    }
+    else{
+
+        evaluateJacobianIrregular(i,j,face_idx,J,S,collected_patches,adj,num_neighbor,num_per_patch,cols,eigenValues,eigenVectors,Phi);
+        
+        
+    }
+}
+*/
+
 __device__ void evaluateJacobianRegular(int vert_idx,int face_idx,int* face, float* J,int * collected_patches, int num_per_patch,int verts_num){
     float basis[12];
     float bary[3];
@@ -229,17 +331,17 @@ __device__ void evaluateJacobianIrregular(int vert_idx,int face_idx,float* J,int
         }    
     }
 
-    for (int i=0;i<N;i++){
+    for (int i=0;i<N+6;i++){
         K = collected_patches[face_idx*num_per_patch+i];
-        C[i*num_per_patch] = 1;
-        C[i*num_per_patch+1] = 1;
-        C[i*num_per_patch+2] = 1;
+        C[i*3] = 1;
+        C[i*3+1] = 1;
+        C[i*3+2] = 1;
         projectPoints(C,Cp,num_per_patch, N,eigenVectors);
         evalSurf(Pp,Cp,num_per_patch,N,bary[1],bary[2],eigenValues,Phi);
         J[vert_idx*verts_num+K] = Pp[0];
-        C[i*num_per_patch] = 0;
-        C[i*num_per_patch+1] = 0;
-        C[i*num_per_patch+2] = 0;
+        C[i*3] = 0;
+        C[i*3+1] = 0;
+        C[i*3+2] = 0;
     }
     
     
@@ -264,3 +366,4 @@ __global__ void evaluateJacobian(int* F,int verts_num, float* J,int* adj,int* vf
         evaluateJacobianIrregular(verts_idx,face_idx,J,collected_patches,adj,num_neighbor,num_per_patch,verts_num,eigenValues,eigenVectors,Phi);
     }
 }
+

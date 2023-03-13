@@ -40,15 +40,22 @@ __global__ void subdivision(int* F, int* NF,float* V,float* NV,float* S,int* adj
     int N,f_adj;
     float alpha;
     float new_pt[3];
-    //Todo boundary case
+    //Todo: boundary case
     for (int i=0;i<3;i++){
         N = valence(adj,pts[i*3],num_neighbor);
         alpha = 5.0/8.0-(3/8+powf(3.0+2*cosf(2.0*3.14/(float)N),2.0))/64.0;
-        
+        /*
+        if (N==3){
+            alpha = 3./16.;
+        }
+        else{
+            alpha = 3./8./N;
+        }
+        */
         new_pt[0]=0;
         new_pt[1]=0;
         new_pt[2]=0;
-        S[pts[i*3]*num_verts+pts[i*3]] = 1-alpha;
+        S[pts[i*3]*num_verts+pts[i*3]] = 1.-alpha;
         new_pt[0] += (1-alpha)*V[pts[i*3]*3];
         new_pt[1] += (1-alpha)*V[pts[i*3]*3+1];
         new_pt[2] += (1-alpha)*V[pts[i*3]*3+2];
