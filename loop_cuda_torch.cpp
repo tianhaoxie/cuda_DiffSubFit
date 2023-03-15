@@ -14,8 +14,34 @@ void loop_cuda_fb(
     int num_neighbor=12);
 
 
+void sub(
+    int* F, 
+    int* NF,
+    float* V,
+    float* NV,
+    float* S,
+    int* ex2,
+    int num_faces,
+    int num_edges,
+    int num_verts,
+    int num_neighbor);
 
-void sub(int* F, int* NF,float* V,float* NV,float* S,int* ex2,int num_faces,int num_edges,int num_verts,int num_neighbor);
+void loop_imls_cuda_fb(
+    float* p_vertices,
+    int* p_faces,
+    float* p_pcd,
+    float* p_n, 
+    float* p_limit,
+    float* p_J,
+    float* p_S,
+    float* p_energy,
+    float* p_jacobian,
+    int num_verts,
+    int num_verts_before_sub,
+    int num_faces,
+    int num_pcd,
+    float radius,
+    int num_neighbor=12);
 
 // C++ interface
 #define CHECK_CUDA(x) TORCH_CHECK(x.is_cuda(), #x " must be a CUDA tensor")
@@ -95,6 +121,114 @@ struct loop_limitation_cuda : torch::CustomClassHolder{
         
     }
     
+    std::vector<torch::Tensor> loop_imls_forward_backward(torch::Tensor& V,torch::Tensor& F,torch::Tensor& pcd,torch::Tensor& N,double radius){
+        CHECK_INPUT(V);
+        CHECK_INPUT(F);
+        CHECK_INPUT(pcd);
+        CHECK_INPUT(N);
+        auto options_float =torch::TensorOptions()
+        .dtype(torch::kFloat32)
+        .layout(torch::kStrided)
+        .device(torch::kCUDA, 0)
+        .requires_grad(false);
+        auto options_int =torch::TensorOptions()
+        .dtype(torch::kInt32)
+        .layout(torch::kStrided)
+        .device(torch::kCUDA, 0)
+        .requires_grad(false);
+        std::vector<torch::Tensor> r(2);
+        
+        int num_neighbor=12;
+        int num_verts = V.size(0);
+        int num_faces = F.size(0);
+        torch::Tensor ex2 = torch::_cast_Int(find_edges(F));
+        torch::Tensor S = torch::zeros({num_verts+ex2.size(0),num_verts},options_float);
+        torch::Tensor NV = torch::zeros({num_verts+ex2.size(0),3},options_float);
+        torch::Tensor NF = torch::zeros({num_faces*4,3},options_int);
+        
+        float* p_vertices = V.data_ptr<float>();
+        float* p_S = S.data_ptr<float>();
+        float* p_NV = NV.data_ptr<float>();
+        float* p_pcd = pcd.data_ptr<float>();
+        float* p_N = N.data_ptr<float>();          
+        int* p_faces = F.data_ptr<int>();
+        int* p_ex2 = ex2.data_ptr<int>();
+        int* p_NF = NF.data_ptr<int>();
+        sub(p_faces,p_NF,p_vertices,p_NV,p_S,p_ex2,num_faces,ex2.size(0),num_verts,num_neighbor);
+        
+        num_verts = NV.size(0);
+        num_faces = NF.size(0);
+        torch::Tensor limit = torch::zeros({num_verts,3},options_float);
+        torch::Tensor energy_imls = torch::zeros({num_verts+1},options_float);
+        torch::Tensor jacobian_imls = torch::zeros({num_verts,3},options_float);
+        torch::Tensor J = torch::zeros({num_verts,num_verts},options_float);
+        //torch::Tensor J = torch::zeros({num_verts,num_verts},options_float);
+        float* p_limit = limit.data_ptr<float>();
+        float* p_energy = energy_imls.data_ptr<float>();
+        float* p_jacobian = jacobian_imls.data_ptr<float>();
+        float* p_J = J.data_ptr<float>();
+
+        loop_imls_cuda_fb(
+            p_NV,
+            p_NF,
+            p_pcd,
+            p_N,
+            p_limit,
+            p_J,
+            p_S,
+            p_energy,
+            p_jacobian,
+            num_verts,
+            V.size(0),
+            num_faces,
+            pcd.size(0),
+            radius,
+            num_neighbor);
+
+        S = S.to_sparse();
+        J = J.to_sparse();
+        jacobian_imls = torch::transpose(J,0,1).mm(jacobian_imls);
+        jacobian_imls = torch::transpose(S,0,1).mm(jacobian_imls);
+        r[0] = torch::zeros(1,options_float);
+        r[0][0] = energy_imls[-1];
+        r[1] = jacobian_imls;
+        return r;
+    }
+
+    std::vector<torch::Tensor> subdivision(torch::Tensor& V,torch::Tensor& F){
+        CHECK_INPUT(V);
+        CHECK_INPUT(F);
+        auto options_float =torch::TensorOptions()
+        .dtype(torch::kFloat32)
+        .layout(torch::kStrided)
+        .device(torch::kCUDA, 0)
+        .requires_grad(false);
+        auto options_int =torch::TensorOptions()
+        .dtype(torch::kInt32)
+        .layout(torch::kStrided)
+        .device(torch::kCUDA, 0)
+        .requires_grad(false);
+        std::vector<torch::Tensor> r(2);
+        
+        int num_neighbor=12;
+        int num_verts = V.size(0);
+        int num_faces = F.size(0);
+        torch::Tensor ex2 = torch::_cast_Int(find_edges(F));
+        torch::Tensor S = torch::zeros({num_verts+ex2.size(0),num_verts},options_float);
+        torch::Tensor NV = torch::zeros({num_verts+ex2.size(0),3},options_float);
+        torch::Tensor NF = torch::zeros({num_faces*4,3},options_int);
+        float* p_vertices = V.data_ptr<float>();
+        float* p_S = S.data_ptr<float>();
+        float* p_NV = NV.data_ptr<float>();        
+        int* p_faces = F.data_ptr<int>();
+        int* p_ex2 = ex2.data_ptr<int>();
+        int* p_NF = NF.data_ptr<int>();
+        sub(p_faces,p_NF,p_vertices,p_NV,p_S,p_ex2,num_faces,ex2.size(0),num_verts,num_neighbor);
+        r[0] = NV;
+        r[1] = NF;
+        return r;
+    }
+
     torch::Tensor find_edges(torch::Tensor& F){
         auto options_int =torch::TensorOptions()
             .dtype(torch::kInt64)
@@ -126,8 +260,9 @@ struct loop_limitation_cuda : torch::CustomClassHolder{
 TORCH_LIBRARY(cuda_loop, m) {
     m.class_<loop_limitation_cuda>("loop_limitation_cuda")
         .def (torch::init())
+        .def ("subdivision", &loop_limitation_cuda::subdivision)
         .def ("loop_forward_backward", &loop_limitation_cuda::loop_forward_backward)
-        
+        .def ("loop_imls_forward_backward", &loop_limitation_cuda::loop_imls_forward_backward)
         
     ;
 }
