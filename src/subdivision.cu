@@ -40,44 +40,66 @@ __global__ void subdivision(int* F, int* NF,float* V,float* NV,float* S,int* adj
     int N,f_adj;
     float alpha;
     float new_pt[3];
-    //Todo: boundary case
+    new_pt[0]=0;
+    new_pt[1]=0;
+    new_pt[2]=0;
+
     for (int i=0;i<3;i++){
         N = valence(adj,pts[i*3],num_neighbor);
-        alpha = 5.0/8.0-(3/8+powf(3.0+2*cosf(2.0*3.14/(float)N),2.0))/64.0;
-        /*
-        if (N==3){
-            alpha = 3./16.;
+        
+        f_adj = ff[face_idx*3+i];
+
+        if (f_adj == -1){
+            //boundary
+            //even vertice
+            S[pts[i*3]*num_verts+pts[i*3]] = 3./4.;
+            S[pts[i*3]*num_verts+adj[pts[i*3]*num_neighbor]] = 1./4.;
+            S[pts[i*3]*num_verts+adj[pts[i*3]*num_neighbor+N-1]] = 1./4.;
+            NV[pts[i*3]*3] = 3./4.*V[pts[i*3]*3]+1./4.*(V[adj[pts[i*3]*num_neighbor]*3]+V[adj[pts[i*3]*num_neighbor+N-1]*3]);
+            NV[pts[i*3]*3+1] = 3./4.*V[pts[i*3]*3+1]+1./4.*(V[adj[pts[i*3]*num_neighbor]*3+1]+V[adj[pts[i*3]*num_neighbor+N-1]*3+1]);
+            NV[pts[i*3]*3+2] = 3./4.*V[pts[i*3]*3+2]+1./4.*(V[adj[pts[i*3]*num_neighbor]*3+2]+V[adj[pts[i*3]*num_neighbor+N-1]*3+2]);
+            //odd vertice
+            S[pts[i*3+1]*num_verts+pts[i*3]] = 1./2.;
+            S[pts[i*3+1]*num_verts+pts[i*3+2]] = 1./2.;
+            NV[pts[i*3+1]*3] = (1./2.)*(V[pts[i*3]*3]+V[pts[i*3+2]*3]);
+            NV[pts[i*3+1]*3+1] = (1./2.)*(V[pts[i*3]*3+1]+V[pts[i*3+2]*3+1]);
+            NV[pts[i*3+1]*3+2] = (1./2.)*(V[pts[i*3]*3+2]+V[pts[i*3+2]*3+2]);
+
         }
         else{
-            alpha = 3./8./N;
+            //alpha = 5.0/8.0-(3/8+powf(3.0+2*cosf(2.0*3.14/(float)N),2.0))/64.0;
+            if (N==3){
+                alpha = 3./16.;
+            }
+            else{
+                alpha = 3./8./N;
+            }
+        
+            //even vertice
+            S[pts[i*3]*num_verts+pts[i*3]] = 1.-N*alpha;
+            new_pt[0] += (1-alpha)*V[pts[i*3]*3];
+            new_pt[1] += (1-alpha)*V[pts[i*3]*3+1];
+            new_pt[2] += (1-alpha)*V[pts[i*3]*3+2];
+            for (int j=0;j<N;j++){
+                S[pts[i*3]*num_verts+adj[pts[i*3]*num_neighbor+j]]= alpha;
+                new_pt[0] += alpha/N*V[adj[pts[i*3]*num_neighbor+j]*3];
+                new_pt[1] += alpha/N*V[adj[pts[i*3]*num_neighbor+j]*3+1];
+                new_pt[2] += alpha/N*V[adj[pts[i*3]*num_neighbor+j]*3+2];
+            }
+            NV[pts[i*3]*3] = new_pt[0];
+            NV[pts[i*3]*3+1] = new_pt[1];
+            NV[pts[i*3]*3+2] = new_pt[2];
+            new_pt[0]=0;
+            new_pt[1]=0;
+            new_pt[2]=0;
+            // odd vertice
+            S[pts[i*3+1]*num_verts+pts[i*3]] = 3./8.;
+            S[pts[i*3+1]*num_verts+pts[i*3+2]] = 3./8.;
+            S[pts[i*3+1]*num_verts+pts[((i+1)%3)*3+2]] = 1./8.;
+            S[pts[i*3+1]*num_verts+F[f_adj*3+(ffi[face_idx*3+i]+2)%3]] = 1./8.; 
+            NV[pts[i*3+1]*3] = (3./8.)*(V[pts[i*3]*3]+V[pts[i*3+2]*3])+(1./8.)*(V[pts[((i+1)%3)*3+2]*3]+V[F[f_adj*3+(ffi[face_idx*3+i]+2)%3]*3]);
+            NV[pts[i*3+1]*3+1] = (3./8.)*(V[pts[i*3]*3+1]+V[pts[i*3+2]*3+1])+(1./8.)*(V[pts[((i+1)%3)*3+2]*3+1]+V[F[f_adj*3+(ffi[face_idx*3+i]+2)%3]*3+1]);
+            NV[pts[i*3+1]*3+2] = (3./8.)*(V[pts[i*3]*3+2]+V[pts[i*3+2]*3+2])+(1./8.)*(V[pts[((i+1)%3)*3+2]*3+2]+V[F[f_adj*3+(ffi[face_idx*3+i]+2)%3]*3+2]);
         }
-        */
-        new_pt[0]=0;
-        new_pt[1]=0;
-        new_pt[2]=0;
-        S[pts[i*3]*num_verts+pts[i*3]] = 1.-alpha;
-        new_pt[0] += (1-alpha)*V[pts[i*3]*3];
-        new_pt[1] += (1-alpha)*V[pts[i*3]*3+1];
-        new_pt[2] += (1-alpha)*V[pts[i*3]*3+2];
-        for (int j=0;j<N;j++){
-            S[pts[i*3]*num_verts+adj[pts[i*3]*num_neighbor+j]]= alpha/N;
-            new_pt[0] += alpha/N*V[adj[pts[i*3]*num_neighbor+j]*3];
-            new_pt[1] += alpha/N*V[adj[pts[i*3]*num_neighbor+j]*3+1];
-            new_pt[2] += alpha/N*V[adj[pts[i*3]*num_neighbor+j]*3+2];
-        }
-        NV[pts[i*3]*3] = new_pt[0];
-        NV[pts[i*3]*3+1] = new_pt[1];
-        NV[pts[i*3]*3+2] = new_pt[2];
-        new_pt[0]=0;
-        new_pt[1]=0;
-        new_pt[2]=0;
-        S[pts[i*3+1]*num_verts+pts[i*3]] = 3.0/8.0;
-        S[pts[i*3+1]*num_verts+pts[i*3+2]] = 3.0/8.0;
-        S[pts[i*3+1]*num_verts+pts[((i+1)%3)*3+2]] = 1.0/8.0;
-        f_adj = ff[face_idx*3+i];
-        S[pts[i*3+1]*num_verts+F[f_adj*3+(ffi[face_idx*3+i]+2)%3]] = 1.0/8.0; 
-        NV[pts[i*3+1]*3] = (3.0/8.0)*(V[pts[i*3]*3]+V[pts[i*3+2]*3])+(1.0/8.0)*(V[pts[((i+1)%3)*3+2]*3]+V[F[f_adj*3+(ffi[face_idx*3+i]+2)%3]*3]);
-        NV[pts[i*3+1]*3+1] = (3.0/8.0)*(V[pts[i*3]*3+1]+V[pts[i*3+2]*3+1])+(1.0/8.0)*(V[pts[((i+1)%3)*3+2]*3+1]+V[F[f_adj*3+(ffi[face_idx*3+i]+2)%3]*3+1]);
-        NV[pts[i*3+1]*3+2] = (3.0/8.0)*(V[pts[i*3]*3+2]+V[pts[i*3+2]*3+2])+(1.0/8.0)*(V[pts[((i+1)%3)*3+2]*3+2]+V[F[f_adj*3+(ffi[face_idx*3+i]+2)%3]*3+2]);
     }
 }

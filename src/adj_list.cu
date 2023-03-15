@@ -1,4 +1,41 @@
 #include "adj_list.h"
+__device__ int search_boundary_start(int* f,int N_f,int* adj,int *tmp, const int vertex_num,const int num_neighbor){
+    int vert_idx  = blockIdx.x * blockDim.x + threadIdx.x;
+    int start = adj[vert_idx*num_neighbor];
+    int idx = 0;
+    for (int i=0;i<num_neighbor;i++){
+        for (int j=0;j<num_neighbor;j++){
+            if (tmp[2*j+1]==start){
+                start = tmp[2*j];
+                idx = j;
+                break;
+            }
+            else if(tmp[2*j+1]==-1 || j==num_neighbor-1){
+                return idx;
+            }
+        }
+    }
+}
+
+__device__ void search_boundary(int* f,int N_f,int* adj,int *tmp, const int vertex_num,const int num_neighbor){
+    int vert_idx  = blockIdx.x * blockDim.x + threadIdx.x;
+    int start_idx = search_boundary_start(f,N_f,adj,tmp,vertex_num,num_neighbor);
+    adj[vert_idx*num_neighbor] = tmp[start_idx*2];
+    adj[vert_idx*num_neighbor+1] = tmp[start_idx*2+1];
+    for (int idx=2;idx<num_neighbor;idx++){
+        for (int i=0;i<num_neighbor;i++){
+            if (tmp[i*2]==adj[vert_idx*num_neighbor+idx-1]){
+                adj[vert_idx*num_neighbor+idx]=tmp[i*2+1];
+                break;
+            }
+            
+            else if (tmp[i*2]==-1){
+                return;
+            }
+        }
+    }
+}
+
 
 __global__ void sorted_adjacency_list(int* f,int N_f,int* adj,int* vf, const int vertex_num,const int num_neighbor){
     int present_thread = blockIdx.x * blockDim.x + threadIdx.x;
@@ -46,8 +83,9 @@ __global__ void sorted_adjacency_list(int* f,int N_f,int* adj,int* vf, const int
                 adj[vert_idx*num_neighbor+idx]=tmp[i*2+1];
                 break;
             }
-            // no chain
+            // no chain,search boundary
             else if (tmp[i*2]==-1){
+                search_boundary(f,N_f,adj,tmp,vertex_num,num_neighbor);
                 return;
             }
         }
