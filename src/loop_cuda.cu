@@ -82,6 +82,18 @@ void sub(int* F, int* NF,float* V,float* NV,float* S,int* ex2,int num_faces,int 
     cudaDeviceSynchronize();
 }
 
+void imls_cuda_fb(float* p_vertices,float* p_pcd,float* p_n,float* p_energy,float* p_jacobian,int num_verts,int num_pcd,float radius){
+    
+    int thread_num =512;
+    int total_thread_num = num_verts;
+    int block_num = total_thread_num/thread_num +1;
+    
+    IMLS_energy<<<block_num,thread_num>>>(p_vertices,p_pcd,p_n,p_energy,p_jacobian,num_verts,num_pcd,radius);
+    cudaDeviceSynchronize();
+    
+    sum_e<<<1,1>>>(p_energy,num_verts);
+}
+
 void loop_imls_cuda_fb(float* p_vertices,int* p_faces,float* p_pcd,float* p_n, float* p_limit,float* p_J,float* p_S,float* p_energy,float* p_jacobian,int num_verts,int num_verts_before_sub,int num_faces,int num_pcd,float radius,int num_neighbor=12){
     thrust::device_vector<int> d_adj(num_verts*num_neighbor);
     thrust::device_vector<int> d_vf(num_verts);
